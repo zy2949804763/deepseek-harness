@@ -3,12 +3,13 @@ import { Worker as Thread, type Transferable } from 'node:worker_threads'
 import { describe, expect, it } from 'vitest'
 import { getDocument, PDFWorker } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { renderPdfPage } from '../src/client/pdf/document.ts'
+import { workerSource } from '../src/client/pdf/assets.ts'
 import { pdfFixture } from './pdf-fixture.ts'
 
 describe('PDF.js real-library smoke', () => {
   it('parses two pages and draws their distinct vector colors in a real worker', async () => {
     const thread = new Thread(new URL('./pdf-worker.fixture.mjs', import.meta.url), {
-      workerData: { workerUrl: import.meta.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs') },
+      workerData: { workerUrl: `data:text/javascript;base64,${Buffer.from(workerSource).toString('base64')}` },
     })
     const ready = Promise.withResolvers<undefined>()
     const failed = Promise.withResolvers<never>()
@@ -37,11 +38,14 @@ describe('PDF.js real-library smoke', () => {
       loading = getDocument({ data: pdfFixture(), worker: bridge })
       const pdf = await Promise.race([loading.promise, failed.promise])
       expect(pdf.numPages).toBe(2)
+      expect((await pdf.getMetadata()).info).toBeDefined()
       const factory = pdf.canvasFactory as {
         create(width: number, height: number): { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D }
         destroy(value: { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D }): void
       }
       for (const page of [1, 2]) {
+        const text = await (await pdf.getPage(page)).getTextContent()
+        expect(text.items.some(item => 'str' in item && item.str.includes('Selectable PDF text'))).toBe(true)
         const target = factory.create(1, 1)
         Object.defineProperty(target.canvas, 'style', { value: { setProperty: () => {} } })
         try {
